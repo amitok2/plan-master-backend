@@ -46,6 +46,17 @@ After creating the service, go to **Environment** tab and add:
 |---------------|-------|-------------|
 | `PYTHON_VERSION` | `3.11` | Specify Python version (recommended) |
 
+### ⚠️ Security Notes:
+
+1. **NEVER commit API keys to Git**
+2. **Generate secure random keys** for `PLAN_MASTER_API_KEYS`:
+   ```bash
+   # Generate a secure key:
+   python3 -c "import secrets; print('pm_' + secrets.token_urlsafe(32))"
+   ```
+3. **Use different keys** for development and production
+4. **Rotate keys regularly** for security
+
 ### Example:
 ```
 GEMINI_API_KEY=AIzaSyD...your-actual-key

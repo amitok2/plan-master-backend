@@ -37,8 +37,11 @@ app.add_middleware(
 
 # Load API keys from environment variable (comma-separated)
 # For production, set PLAN_MASTER_API_KEYS="key1,key2,key3" in Render
-API_KEYS_ENV = os.environ.get("PLAN_MASTER_API_KEYS", "test-key-123,dev-key-456")
+# Default admin key for internal use (backend code is private, not exposed to users)
+API_KEYS_ENV = os.environ.get("PLAN_MASTER_API_KEYS", "pm_admin_7k9mX2nQ8pL4vR6wY3jT5hB1cN0zF")
 VALID_API_KEYS = set(key.strip() for key in API_KEYS_ENV.split(",") if key.strip())
+
+logger.info(f"Backend initialized with {len(VALID_API_KEYS)} valid API key(s)")
 
 def get_gemini_model():
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -117,6 +120,7 @@ def verify_api_key(authorization: str = Header(None)):
 @app.get("/", tags=["health"])
 async def root():
     """Root endpoint - health check"""
+    logger.info("GET / - Root health check")
     return {
         "message": "Plan Master Backend API is running",
         "status": "healthy",
@@ -128,6 +132,7 @@ async def root():
 @app.get("/health", tags=["health"])
 async def health_check():
     """Detailed health check endpoint"""
+    logger.info("GET /health - Health check requested")
     try:
         gemini_configured = bool(os.environ.get("GEMINI_API_KEY"))
         
@@ -178,6 +183,7 @@ async def general_exception_handler(request, exc: Exception):
 
 @app.post("/analyze/categorize")
 async def categorize_feature(request: FeatureRequest, token: str = Depends(verify_api_key)):
+    logger.info(f"POST /analyze/categorize - Feature: {request.feature_description[:50]}...")
     model = get_gemini_model()
     
     system_prompt = """You are a Senior Product Manager. Categorize the following feature request into one of these categories:
@@ -199,6 +205,7 @@ async def categorize_feature(request: FeatureRequest, token: str = Depends(verif
 
 @app.post("/plan/clarify")
 async def clarify_feature(request: ClarifyRequest, token: str = Depends(verify_api_key)):
+    logger.info(f"POST /plan/clarify - Request: {request.request[:50]}...")
     # Use high thinking level for clarification as it requires deeper analysis
     api_key = os.environ.get("GEMINI_API_KEY")
     genai.configure(api_key=api_key)
@@ -245,6 +252,7 @@ async def clarify_feature(request: ClarifyRequest, token: str = Depends(verify_a
 
 @app.post("/plan/prd")
 async def generate_prd(request: PRDRequest, token: str = Depends(verify_api_key)):
+    logger.info(f"POST /plan/prd - Goal: {request.goal[:50]}...")
     model = get_gemini_model()
     
     system_prompt = """You are a Senior Product Manager. Your goal is to create a Product Requirements Document (PRD) for a new feature or tool.
@@ -270,6 +278,7 @@ async def generate_prd(request: PRDRequest, token: str = Depends(verify_api_key)
 
 @app.post("/plan/blueprint")
 async def generate_blueprint(request: BlueprintRequest, token: str = Depends(verify_api_key)):
+    logger.info("POST /plan/blueprint - Generating technical blueprint")
     model = get_gemini_model()
     
     system_prompt = """You are a Senior Software Architect. Your goal is to create a Technical Implementation Blueprint based on the PRD and existing codebase.
@@ -313,6 +322,7 @@ async def generate_blueprint(request: BlueprintRequest, token: str = Depends(ver
 
 @app.post("/plan/tasks")
 async def generate_tasks(request: TasksRequest, token: str = Depends(verify_api_key)):
+    logger.info("POST /plan/tasks - Generating actionable tasks")
     model = get_gemini_model()
     
     system_prompt = """You are a Technical Lead. Your goal is to break down the Technical Blueprint into a series of actionable, atomic tasks.
@@ -335,6 +345,7 @@ async def generate_tasks(request: TasksRequest, token: str = Depends(verify_api_
 
 @app.post("/repo/index")
 async def index_codebase(request: IndexRequest, token: str = Depends(verify_api_key)):
+    logger.info(f"POST /repo/index - Indexing {len(request.important_files)} files")
     # In a real implementation, this would:
     # 1. Parse the structure and files
     # 2. Generate embeddings for file content using Gemini
@@ -347,6 +358,7 @@ async def index_codebase(request: IndexRequest, token: str = Depends(verify_api_
 
 @app.post("/repo/search")
 async def search_code(request: SearchRequest, token: str = Depends(verify_api_key)):
+    logger.info(f"POST /repo/search - Query: {request.query[:50]}...")
     # Stub implementation
     # In real life: vector_db.search(request.query)
     model = get_gemini_model()
@@ -355,17 +367,20 @@ async def search_code(request: SearchRequest, token: str = Depends(verify_api_ke
 
 @app.post("/repo/related")
 async def get_related_files(request: RelatedRequest, token: str = Depends(verify_api_key)):
+    logger.info(f"POST /repo/related - Target: {request.target}")
     # Stub implementation
     # In real life: graph_db.get_neighbors(request.target)
     return {"result": f"Dependencies for '{request.target}': [MockServiceA, MockDB, Utils]"}
 
 @app.post("/memory/append")
 async def append_memory(request: MemoryRequest, token: str = Depends(verify_api_key)):
+    logger.info(f"POST /memory/append - Key: {request.key or 'default'}")
     # Stub: Append to project memory in DB
     return {"result": "Memory updated."}
 
 @app.post("/memory/read")
 async def read_memory(request: MemoryRequest, token: str = Depends(verify_api_key)):
+    logger.info(f"POST /memory/read - Key: {request.key or 'default'}")
     # Stub: Read from project memory
     return {"result": "Project Memory: [Feature X implemented], [Refactor Y pending]."}
 
