@@ -8,10 +8,12 @@ import google.generativeai as genai
 # Load environment variables from .env file if present
 load_dotenv()
 
-app = FastAPI()
+app = FastAPI(title="Plan Master Backend API", version="1.0.0")
 
-# In a real scenario, you'd use a database for API keys
-VALID_API_KEYS = {"test-key-123", "dev-key-456"}
+# Load API keys from environment variable (comma-separated)
+# For production, set PLAN_MASTER_API_KEYS="key1,key2,key3" in Render
+API_KEYS_ENV = os.environ.get("PLAN_MASTER_API_KEYS", "test-key-123,dev-key-456")
+VALID_API_KEYS = set(key.strip() for key in API_KEYS_ENV.split(",") if key.strip())
 
 def get_gemini_model():
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -86,6 +88,26 @@ def verify_api_key(authorization: str = Header(None)):
     if token not in VALID_API_KEYS:
         raise HTTPException(status_code=401, detail="Invalid API key")
     return token
+
+@app.get("/")
+async def root():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "service": "Plan Master Backend API",
+        "version": "1.0.0",
+        "gemini_model": "gemini-3-pro-preview"
+    }
+
+@app.get("/health")
+async def health_check():
+    """Detailed health check"""
+    gemini_configured = bool(os.environ.get("GEMINI_API_KEY"))
+    return {
+        "status": "healthy",
+        "gemini_api_configured": gemini_configured,
+        "valid_api_keys_count": len(VALID_API_KEYS)
+    }
 
 @app.post("/analyze/categorize")
 async def categorize_feature(request: FeatureRequest, token: str = Depends(verify_api_key)):
