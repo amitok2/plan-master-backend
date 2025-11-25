@@ -1,14 +1,39 @@
 import os
+import logging
 from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from dotenv import load_dotenv
 import google.generativeai as genai
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
+
 # Load environment variables from .env file if present
 load_dotenv()
 
-app = FastAPI(title="Plan Master Backend API", version="1.0.0")
+app = FastAPI(
+    title="Plan Master Backend API",
+    description="AI-powered feature planning and codebase analysis API",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure this properly for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Load API keys from environment variable (comma-separated)
 # For production, set PLAN_MASTER_API_KEYS="key1,key2,key3" in Render
@@ -89,25 +114,67 @@ def verify_api_key(authorization: str = Header(None)):
         raise HTTPException(status_code=401, detail="Invalid API key")
     return token
 
-@app.get("/")
+@app.get("/", tags=["health"])
 async def root():
-    """Health check endpoint"""
+    """Root endpoint - health check"""
     return {
+        "message": "Plan Master Backend API is running",
         "status": "healthy",
-        "service": "Plan Master Backend API",
         "version": "1.0.0",
+        "docs": "/docs",
         "gemini_model": "gemini-3-pro-preview"
     }
 
-@app.get("/health")
+@app.get("/health", tags=["health"])
 async def health_check():
-    """Detailed health check"""
-    gemini_configured = bool(os.environ.get("GEMINI_API_KEY"))
-    return {
-        "status": "healthy",
-        "gemini_api_configured": gemini_configured,
-        "valid_api_keys_count": len(VALID_API_KEYS)
-    }
+    """Detailed health check endpoint"""
+    try:
+        gemini_configured = bool(os.environ.get("GEMINI_API_KEY"))
+        
+        # Test Gemini API connection
+        if gemini_configured:
+            try:
+                model = get_gemini_model()
+                logger.info("Gemini API connection successful")
+            except Exception as e:
+                logger.error(f"Gemini API connection failed: {e}")
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Service unhealthy - Gemini API connection failed: {str(e)}"
+                )
+        
+        return {
+            "status": "healthy",
+            "gemini_api_configured": gemini_configured,
+            "valid_api_keys_count": len(VALID_API_KEYS),
+            "version": "1.0.0"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="Service unhealthy"
+        )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc: HTTPException):
+    """Custom HTTP exception handler"""
+    logger.error(f"HTTP exception: {exc.detail}")
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.detail, "status_code": exc.status_code}
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request, exc: Exception):
+    """General exception handler"""
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Internal server error", "details": str(exc)}
+    )
 
 @app.post("/analyze/categorize")
 async def categorize_feature(request: FeatureRequest, token: str = Depends(verify_api_key)):
@@ -301,3 +368,13 @@ async def append_memory(request: MemoryRequest, token: str = Depends(verify_api_
 async def read_memory(request: MemoryRequest, token: str = Depends(verify_api_key)):
     # Stub: Read from project memory
     return {"result": "Project Memory: [Feature X implemented], [Refactor Y pending]."}
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    logger.info(f"Starting server on port {port}")
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=port
+    )
