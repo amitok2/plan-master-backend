@@ -26,10 +26,6 @@ COPY . .
 # Expose port (Render will provide PORT env var, defaults to 10000)
 EXPOSE 10000
 
-# Health check - dynamically check the port being used
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD python -c "import requests, os; port = os.environ.get('PORT', 10000); requests.get(f'http://localhost:{port}/health', timeout=10)"
-
 # Run the application using main.py which handles the PORT env var
 CMD ["python", "main.py"]
 
