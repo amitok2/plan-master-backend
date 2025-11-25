@@ -4,10 +4,12 @@ from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Literal
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+import anthropic
+from openai import OpenAI
 
 # Configure logging
 logging.basicConfig(
@@ -44,53 +46,131 @@ VALID_API_KEYS = set(key.strip() for key in API_KEYS_ENV.split(",") if key.strip
 
 logger.info(f"Backend initialized with {len(VALID_API_KEYS)} valid API key(s)")
 
-def get_gemini_client():
-    """Get Gemini client instance"""
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        # Try looking in a .env file in the parent directory as well
-        load_dotenv(os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env'))
-        api_key = os.environ.get("GEMINI_API_KEY")
+def get_ai_clients():
+    """Get all available AI client instances"""
+    clients = {}
     
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY environment variable is not set on the backend.")
+    # Gemini
+    gemini_key = os.environ.get("GEMINI_API_KEY")
+    if gemini_key:
+        clients['gemini'] = genai.Client(api_key=gemini_key)
+        logger.info("✅ Gemini client initialized")
     
-    # Using the new google.genai SDK
-    return genai.Client(api_key=api_key)
+    # Anthropic (Claude)
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+    if anthropic_key:
+        clients['anthropic'] = anthropic.Anthropic(api_key=anthropic_key)
+        logger.info("✅ Anthropic client initialized")
+    
+    # OpenAI (GPT)
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    if openai_key:
+        clients['openai'] = OpenAI(api_key=openai_key)
+        logger.info("✅ OpenAI client initialized")
+    
+    if not clients:
+        raise ValueError("No AI API keys configured. Set at least one: GEMINI_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY")
+    
+    return clients
 
-def generate_with_gemini(client: genai.Client, prompt: str, model: str = "gemini-2.5-pro", config: dict = None):
+def generate_with_ai(
+    prompt: str, 
+    provider: Literal["gemini", "anthropic", "openai"] = "gemini",
+    model: str = None,
+    config: dict = None
+):
     """
-    Generate content using specified Gemini model
+    Universal AI generation function supporting multiple providers
     
-    Model Selection Strategy:
-    - gemini-2.5-pro (default): Best for most tasks, balanced performance and cost
-    - gemini-3-pro-preview: Advanced reasoning for complex planning and architecture decisions
-    - gemini-2.0-flash-exp: Fast responses for simple queries (if needed)
+    Provider & Model Selection Strategy:
+    
+    GEMINI (Google):
+    - gemini-2.5-pro (default): Best for most tasks, balanced performance
+    - gemini-3-pro-preview: Advanced reasoning for complex decisions
+    
+    ANTHROPIC (Claude):
+    - claude-sonnet-4-5: Excellent reasoning, great for complex planning
+    
+    OPENAI (GPT):
+    - gpt-5.1: Latest GPT model with configurable reasoning
     
     Args:
-        client: Gemini client instance
         prompt: The prompt to send
-        model: Model name (default: gemini-2.5-pro)
+        provider: AI provider ("gemini", "anthropic", "openai")
+        model: Model name (uses provider default if None)
         config: Optional generation config
     
     Returns:
-        Response object with .text attribute
+        Generated text response
     """
     try:
-        if config:
-            response = client.models.generate_content(
+        clients = get_ai_clients()
+        
+        if provider == "gemini":
+            if provider not in clients:
+                raise ValueError("Gemini API key not configured")
+            
+            model = model or "gemini-2.5-pro"
+            client = clients['gemini']
+            
+            if config:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(**config)
+                )
+            else:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                )
+            return response.text
+        
+        elif provider == "anthropic":
+            if provider not in clients:
+                raise ValueError("Anthropic API key not configured")
+            
+            model = model or "claude-sonnet-4-5"
+            client = clients['anthropic']
+            
+            max_tokens = config.get('max_tokens', 4096) if config else 4096
+            
+            message = client.messages.create(
                 model=model,
-                contents=prompt,
-                config=types.GenerateContentConfig(**config)
+                max_tokens=max_tokens,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
             )
+            return message.content[0].text
+        
+        elif provider == "openai":
+            if provider not in clients:
+                raise ValueError("OpenAI API key not configured")
+            
+            model = model or "gpt-5.1"
+            client = clients['openai']
+            
+            # GPT-5 uses the new responses API
+            reasoning_effort = config.get('reasoning_effort', 'low') if config else 'low'
+            verbosity = config.get('verbosity', 'medium') if config else 'medium'
+            
+            result = client.responses.create(
+                model=model,
+                input=prompt,
+                reasoning={"effort": reasoning_effort},
+                text={"verbosity": verbosity}
+            )
+            return result.output_text
+        
         else:
-            response = client.models.generate_content(
-                model=model,
-                contents=prompt,
-            )
-        return response
+            raise ValueError(f"Unknown provider: {provider}")
+    
     except Exception as e:
-        logger.error(f"Error generating content with {model}: {e}")
+        logger.error(f"Error generating content with {provider}/{model}: {e}")
         raise
 
 class FileContext(BaseModel):
@@ -165,21 +245,28 @@ async def health_check():
     try:
         gemini_configured = bool(os.environ.get("GEMINI_API_KEY"))
         
-        # Test Gemini API connection
-        if gemini_configured:
-            try:
-                client = get_gemini_client()
-                logger.info("Gemini API connection successful")
-            except Exception as e:
-                logger.error(f"Gemini API connection failed: {e}")
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"Service unhealthy - Gemini API connection failed: {str(e)}"
-                )
+        # Test AI API connections
+        try:
+            clients = get_ai_clients()
+            available_providers = list(clients.keys())
+            logger.info(f"AI providers available: {available_providers}")
+        except Exception as e:
+            logger.error(f"AI API connection failed: {e}")
+            raise HTTPException(
+                status_code=503,
+                detail=f"Service unhealthy - No AI providers configured: {str(e)}"
+            )
+        
+        # Check which AI providers are configured
+        ai_providers = {
+            "gemini": bool(os.environ.get("GEMINI_API_KEY")),
+            "anthropic": bool(os.environ.get("ANTHROPIC_API_KEY")),
+            "openai": bool(os.environ.get("OPENAI_API_KEY"))
+        }
         
         return {
             "status": "healthy",
-            "gemini_api_configured": gemini_configured,
+            "ai_providers": ai_providers,
             "valid_api_keys_count": len(VALID_API_KEYS),
             "version": "1.0.0"
         }
@@ -213,7 +300,6 @@ async def general_exception_handler(request, exc: Exception):
 @app.post("/analyze/categorize")
 async def categorize_feature(request: FeatureRequest, token: str = Depends(verify_api_key)):
     logger.info(f"POST /analyze/categorize - Feature: {request.feature_description[:50]}...")
-    client = get_gemini_client()
     
     system_prompt = """You are a Senior Product Manager. Categorize the following feature request into one of these categories:
     - Landing pages
@@ -229,18 +315,17 @@ async def categorize_feature(request: FeatureRequest, token: str = Depends(verif
     Also list 3-5 key technical considerations for this specific category.
     """
     
-    # Use default gemini-2.5-pro for categorization (simple classification task)
-    response = generate_with_gemini(
-        client, 
+    # Use gemini-2.5-pro for categorization (simple classification task)
+    result = generate_with_ai(
         f"{system_prompt}\n\nFeature Request: {request.feature_description}",
+        provider="gemini",
         model="gemini-2.5-pro"
     )
-    return {"result": response.text}
+    return {"result": result}
 
 @app.post("/plan/clarify")
 async def clarify_feature(request: ClarifyRequest, token: str = Depends(verify_api_key)):
     logger.info(f"POST /plan/clarify - Request: {request.goal[:50]}...")
-    client = get_gemini_client()
     
     system_prompt = """You are a Senior Product Manager and Technical Architect. Your goal is to ask clarifying questions BEFORE creating a full feature plan.
     
@@ -273,17 +358,18 @@ async def clarify_feature(request: ClarifyRequest, token: str = Depends(verify_a
     
     prompt = f"{system_prompt}\n\nFeature Request: {request.goal}\n\nCodebase Context:\n{request.codebase_context}"
     
-    response = generate_with_gemini(
-        client,
+    # Use Claude 4.5 for clarification (excellent at reasoning and asking insightful questions)
+    result = generate_with_ai(
         prompt,
-        model="gemini-3-pro-preview"
+        provider="anthropic",
+        model="claude-sonnet-4-5",
+        config={"max_tokens": 2048}
     )
-    return {"result": response.text, "needs_clarification": "No clarification needed" not in response.text}
+    return {"result": result, "needs_clarification": "No clarification needed" not in result}
 
 @app.post("/plan/prd")
 async def generate_prd(request: PRDRequest, token: str = Depends(verify_api_key)):
     logger.info(f"POST /plan/prd - Goal: {request.goal[:50]}...")
-    client = get_gemini_client()
     
     system_prompt = """You are a Senior Product Manager. Your goal is to create a Product Requirements Document (PRD) for a new feature or tool.
     
@@ -304,13 +390,14 @@ async def generate_prd(request: PRDRequest, token: str = Depends(verify_api_key)
     
     prompt = f"{system_prompt}\n\nGoal: {request.goal}\n\nCodebase Context:\n{request.codebase_context}\n\nAdditional Context:\n{request.additional_context}"
     
-    # Use gemini-2.5-pro for PRD generation (good balance of quality and speed)
-    response = generate_with_gemini(
-        client,
+    # Use GPT-5.1 for PRD generation (excellent at structured documents)
+    result = generate_with_ai(
         prompt,
-        model="gemini-2.5-pro"
+        provider="openai",
+        model="gpt-5.1",
+        config={"reasoning_effort": "medium", "verbosity": "medium"}
     )
-    return {"result": response.text}
+    return {"result": result}
 
 @app.post("/plan/blueprint")
 async def generate_blueprint(request: BlueprintRequest, token: str = Depends(verify_api_key)):
@@ -364,7 +451,6 @@ async def generate_blueprint(request: BlueprintRequest, token: str = Depends(ver
 @app.post("/plan/tasks")
 async def generate_tasks(request: TasksRequest, token: str = Depends(verify_api_key)):
     logger.info("POST /plan/tasks - Generating actionable tasks")
-    client = get_gemini_client()
     
     system_prompt = """You are a Technical Lead. Your goal is to break down the Technical Blueprint into a series of actionable, atomic tasks.
     
@@ -383,12 +469,12 @@ async def generate_tasks(request: TasksRequest, token: str = Depends(verify_api_
     prompt = f"{system_prompt}\n\nTechnical Blueprint:\n{request.blueprint_content}\n\nAdditional Context:\n{request.additional_context}"
     
     # Use gemini-2.5-pro for task generation (structured output, good balance)
-    response = generate_with_gemini(
-        client,
+    result = generate_with_ai(
         prompt,
+        provider="gemini",
         model="gemini-2.5-pro"
     )
-    return {"result": response.text}
+    return {"result": result}
 
 @app.post("/repo/index")
 async def index_codebase(request: IndexRequest, token: str = Depends(verify_api_key)):
@@ -408,15 +494,14 @@ async def search_code(request: SearchRequest, token: str = Depends(verify_api_ke
     logger.info(f"POST /repo/search - Query: {request.query[:50]}...")
     # Stub implementation
     # In real life: vector_db.search(request.query)
-    client = get_gemini_client()
     
     # Use gemini-2.5-pro for search simulation (fast, simple task)
-    response = generate_with_gemini(
-        client,
+    result = generate_with_ai(
         f"Simulate a semantic code search result for query: '{request.query}'. Return 2-3 mocked file paths and snippet descriptions relevant to a typical web app.",
+        provider="gemini",
         model="gemini-2.5-pro"
     )
-    return {"result": response.text}
+    return {"result": result}
 
 @app.post("/repo/related")
 async def get_related_files(request: RelatedRequest, token: str = Depends(verify_api_key)):
