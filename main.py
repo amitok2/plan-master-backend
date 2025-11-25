@@ -45,6 +45,7 @@ VALID_API_KEYS = set(key.strip() for key in API_KEYS_ENV.split(",") if key.strip
 logger.info(f"Backend initialized with {len(VALID_API_KEYS)} valid API key(s)")
 
 def get_gemini_client():
+    """Get Gemini client instance"""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         # Try looking in a .env file in the parent directory as well
@@ -54,8 +55,43 @@ def get_gemini_client():
     if not api_key:
         raise ValueError("GEMINI_API_KEY environment variable is not set on the backend.")
     
-    # Using the new google.genai SDK for Gemini 3.0 Pro Preview
+    # Using the new google.genai SDK
     return genai.Client(api_key=api_key)
+
+def generate_with_gemini(client: genai.Client, prompt: str, model: str = "gemini-2.5-pro", config: dict = None):
+    """
+    Generate content using specified Gemini model
+    
+    Model Selection Strategy:
+    - gemini-2.5-pro (default): Best for most tasks, balanced performance and cost
+    - gemini-3-pro-preview: Advanced reasoning for complex planning and architecture decisions
+    - gemini-2.0-flash-exp: Fast responses for simple queries (if needed)
+    
+    Args:
+        client: Gemini client instance
+        prompt: The prompt to send
+        model: Model name (default: gemini-2.5-pro)
+        config: Optional generation config
+    
+    Returns:
+        Response object with .text attribute
+    """
+    try:
+        if config:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(**config)
+            )
+        else:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+            )
+        return response
+    except Exception as e:
+        logger.error(f"Error generating content with {model}: {e}")
+        raise
 
 class FileContext(BaseModel):
     path: str
@@ -193,9 +229,11 @@ async def categorize_feature(request: FeatureRequest, token: str = Depends(verif
     Also list 3-5 key technical considerations for this specific category.
     """
     
-    response = client.models.generate_content(
-        model="gemini-3-pro-preview",
-        contents=f"{system_prompt}\n\nFeature Request: {request.feature_description}",
+    # Use default gemini-2.5-pro for categorization (simple classification task)
+    response = generate_with_gemini(
+        client, 
+        f"{system_prompt}\n\nFeature Request: {request.feature_description}",
+        model="gemini-2.5-pro"
     )
     return {"result": response.text}
 
@@ -234,9 +272,11 @@ async def clarify_feature(request: ClarifyRequest, token: str = Depends(verify_a
     """
     
     prompt = f"{system_prompt}\n\nFeature Request: {request.goal}\n\nCodebase Context:\n{request.codebase_context}"
-    response = client.models.generate_content(
-        model="gemini-3-pro-preview",
-        contents=prompt,
+    
+    response = generate_with_gemini(
+        client,
+        prompt,
+        model="gemini-3-pro-preview"
     )
     return {"result": response.text, "needs_clarification": "No clarification needed" not in response.text}
 
@@ -263,9 +303,12 @@ async def generate_prd(request: PRDRequest, token: str = Depends(verify_api_key)
     """
     
     prompt = f"{system_prompt}\n\nGoal: {request.goal}\n\nCodebase Context:\n{request.codebase_context}\n\nAdditional Context:\n{request.additional_context}"
-    response = client.models.generate_content(
-        model="gemini-3-pro-preview",
-        contents=prompt,
+    
+    # Use gemini-2.5-pro for PRD generation (good balance of quality and speed)
+    response = generate_with_gemini(
+        client,
+        prompt,
+        model="gemini-2.5-pro"
     )
     return {"result": response.text}
 
@@ -310,11 +353,13 @@ async def generate_blueprint(request: BlueprintRequest, token: str = Depends(ver
     """
     
     prompt = f"{system_prompt}\n\nPRD:\n{request.prd_content}\n\nCodebase Analysis:\n{request.codebase_context}\n\nAdditional Context:\n{request.additional_context}"
-    response = client.models.generate_content(
-        model="gemini-3-pro-preview",
-        contents=prompt,
+    
+    # Use gemini-2.5-pro for blueprint (good balance of quality and speed)
+    response = generate_with_gemini(
+        client,
+        prompt,
+        model="gemini-2.5-pro"
     )
-    return {"result": response.text}
 
 @app.post("/plan/tasks")
 async def generate_tasks(request: TasksRequest, token: str = Depends(verify_api_key)):
@@ -336,9 +381,12 @@ async def generate_tasks(request: TasksRequest, token: str = Depends(verify_api_
     """
     
     prompt = f"{system_prompt}\n\nTechnical Blueprint:\n{request.blueprint_content}\n\nAdditional Context:\n{request.additional_context}"
-    response = client.models.generate_content(
-        model="gemini-3-pro-preview",
-        contents=prompt,
+    
+    # Use gemini-2.5-pro for task generation (structured output, good balance)
+    response = generate_with_gemini(
+        client,
+        prompt,
+        model="gemini-2.5-pro"
     )
     return {"result": response.text}
 
@@ -361,9 +409,12 @@ async def search_code(request: SearchRequest, token: str = Depends(verify_api_ke
     # Stub implementation
     # In real life: vector_db.search(request.query)
     client = get_gemini_client()
-    response = client.models.generate_content(
-        model="gemini-3-pro-preview",
-        contents=f"Simulate a semantic code search result for query: '{request.query}'. Return 2-3 mocked file paths and snippet descriptions relevant to a typical web app.",
+    
+    # Use gemini-2.5-pro for search simulation (fast, simple task)
+    response = generate_with_gemini(
+        client,
+        f"Simulate a semantic code search result for query: '{request.query}'. Return 2-3 mocked file paths and snippet descriptions relevant to a typical web app.",
+        model="gemini-2.5-pro"
     )
     return {"result": response.text}
 
