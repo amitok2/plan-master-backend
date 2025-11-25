@@ -23,14 +23,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Expose port (Render will provide PORT env var)
-EXPOSE 8000
+# Expose port (Render will provide PORT env var, defaults to 10000)
+EXPOSE 10000
 
-# Health check
+# Health check - dynamically check the port being used
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/health', timeout=10)"
+    CMD python -c "import requests, os; port = os.environ.get('PORT', 10000); requests.get(f'http://localhost:{port}/health', timeout=10)"
 
-# Run the application
-# Use PORT environment variable from Render
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Run the application using main.py which handles the PORT env var
+CMD ["python", "main.py"]
 

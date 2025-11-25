@@ -386,8 +386,10 @@ async def read_memory(request: MemoryRequest, token: str = Depends(verify_api_ke
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    logger.info(f"Starting server on port {port}")
+    # Render provides the PORT environment variable
+    # Default to 10000 if not set (standard Render behavior)
+    port = int(os.environ.get("PORT", 10000))
+    logger.info(f"Starting server on 0.0.0.0:{port}")
     uvicorn.run(
         app,
         host="0.0.0.0",
