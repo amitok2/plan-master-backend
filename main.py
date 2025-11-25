@@ -54,13 +54,13 @@ def get_gemini_model():
         raise ValueError("GEMINI_API_KEY environment variable is not set on the backend.")
     
     genai.configure(api_key=api_key)
-    # Using Gemini 3.0 Pro with low thinking level for faster responses
-    # For complex reasoning tasks, use thinking_level="high"
+    # Using Gemini 3.0 Pro Preview
+    # Note: thinking_level parameter not yet supported in current SDK version
+    # Gemini 3 uses dynamic thinking by default
     return genai.GenerativeModel(
-        'gemini-3-pro-preview',
+        'gemini-3-pro-preview', 
         generation_config={
-            "thinking_level": "low",  # Fast responses for planning tasks
-            "temperature": 1.0  # Keep default temperature as recommended
+            "temperature": 1.0 
         }
     )
 
@@ -206,13 +206,12 @@ async def categorize_feature(request: FeatureRequest, token: str = Depends(verif
 @app.post("/plan/clarify")
 async def clarify_feature(request: ClarifyRequest, token: str = Depends(verify_api_key)):
     logger.info(f"POST /plan/clarify - Request: {request.goal[:50]}...")
-    # Use high thinking level for clarification as it requires deeper analysis
+    # Clarification requires deeper analysis - Gemini 3 handles this automatically
     api_key = os.environ.get("GEMINI_API_KEY")
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(
         'gemini-3-pro-preview',
         generation_config={
-            "thinking_level": "high",  # Deep reasoning for question generation
             "temperature": 1.0
         }
     )
