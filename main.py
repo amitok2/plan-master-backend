@@ -6,7 +6,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from dotenv import load_dotenv
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 # Configure logging
 logging.basicConfig(
@@ -43,7 +44,7 @@ VALID_API_KEYS = set(key.strip() for key in API_KEYS_ENV.split(",") if key.strip
 
 logger.info(f"Backend initialized with {len(VALID_API_KEYS)} valid API key(s)")
 
-def get_gemini_model():
+def get_gemini_client():
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         # Try looking in a .env file in the parent directory as well
@@ -53,16 +54,8 @@ def get_gemini_model():
     if not api_key:
         raise ValueError("GEMINI_API_KEY environment variable is not set on the backend.")
     
-    genai.configure(api_key=api_key)
-    # Using Gemini 3.0 Pro Preview
-    # Note: thinking_level parameter not yet supported in current SDK version
-    # Gemini 3 uses dynamic thinking by default
-    return genai.GenerativeModel(
-        'gemini-3-pro-preview', 
-        generation_config={
-            "temperature": 1.0 
-        }
-    )
+    # Using the new google.genai SDK for Gemini 3.0 Pro Preview
+    return genai.Client(api_key=api_key)
 
 class FileContext(BaseModel):
     path: str
@@ -139,7 +132,7 @@ async def health_check():
         # Test Gemini API connection
         if gemini_configured:
             try:
-                model = get_gemini_model()
+                client = get_gemini_client()
                 logger.info("Gemini API connection successful")
             except Exception as e:
                 logger.error(f"Gemini API connection failed: {e}")
@@ -184,7 +177,7 @@ async def general_exception_handler(request, exc: Exception):
 @app.post("/analyze/categorize")
 async def categorize_feature(request: FeatureRequest, token: str = Depends(verify_api_key)):
     logger.info(f"POST /analyze/categorize - Feature: {request.feature_description[:50]}...")
-    model = get_gemini_model()
+    client = get_gemini_client()
     
     system_prompt = """You are a Senior Product Manager. Categorize the following feature request into one of these categories:
     - Landing pages
@@ -200,21 +193,16 @@ async def categorize_feature(request: FeatureRequest, token: str = Depends(verif
     Also list 3-5 key technical considerations for this specific category.
     """
     
-    response = model.generate_content(f"{system_prompt}\n\nFeature Request: {request.feature_description}")
+    response = client.models.generate_content(
+        model="gemini-3-pro-preview",
+        contents=f"{system_prompt}\n\nFeature Request: {request.feature_description}",
+    )
     return {"result": response.text}
 
 @app.post("/plan/clarify")
 async def clarify_feature(request: ClarifyRequest, token: str = Depends(verify_api_key)):
     logger.info(f"POST /plan/clarify - Request: {request.goal[:50]}...")
-    # Clarification requires deeper analysis - Gemini 3 handles this automatically
-    api_key = os.environ.get("GEMINI_API_KEY")
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(
-        'gemini-3-pro-preview',
-        generation_config={
-            "temperature": 1.0
-        }
-    )
+    client = get_gemini_client()
     
     system_prompt = """You are a Senior Product Manager and Technical Architect. Your goal is to ask clarifying questions BEFORE creating a full feature plan.
     
@@ -246,13 +234,16 @@ async def clarify_feature(request: ClarifyRequest, token: str = Depends(verify_a
     """
     
     prompt = f"{system_prompt}\n\nFeature Request: {request.goal}\n\nCodebase Context:\n{request.codebase_context}"
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(
+        model="gemini-3-pro-preview",
+        contents=prompt,
+    )
     return {"result": response.text, "needs_clarification": "No clarification needed" not in response.text}
 
 @app.post("/plan/prd")
 async def generate_prd(request: PRDRequest, token: str = Depends(verify_api_key)):
     logger.info(f"POST /plan/prd - Goal: {request.goal[:50]}...")
-    model = get_gemini_model()
+    client = get_gemini_client()
     
     system_prompt = """You are a Senior Product Manager. Your goal is to create a Product Requirements Document (PRD) for a new feature or tool.
     
@@ -272,13 +263,16 @@ async def generate_prd(request: PRDRequest, token: str = Depends(verify_api_key)
     """
     
     prompt = f"{system_prompt}\n\nGoal: {request.goal}\n\nCodebase Context:\n{request.codebase_context}\n\nAdditional Context:\n{request.additional_context}"
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(
+        model="gemini-3-pro-preview",
+        contents=prompt,
+    )
     return {"result": response.text}
 
 @app.post("/plan/blueprint")
 async def generate_blueprint(request: BlueprintRequest, token: str = Depends(verify_api_key)):
     logger.info("POST /plan/blueprint - Generating technical blueprint")
-    model = get_gemini_model()
+    client = get_gemini_client()
     
     system_prompt = """You are a Senior Software Architect. Your goal is to create a Technical Implementation Blueprint based on the PRD and existing codebase.
     
@@ -316,13 +310,16 @@ async def generate_blueprint(request: BlueprintRequest, token: str = Depends(ver
     """
     
     prompt = f"{system_prompt}\n\nPRD:\n{request.prd_content}\n\nCodebase Analysis:\n{request.codebase_context}\n\nAdditional Context:\n{request.additional_context}"
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(
+        model="gemini-3-pro-preview",
+        contents=prompt,
+    )
     return {"result": response.text}
 
 @app.post("/plan/tasks")
 async def generate_tasks(request: TasksRequest, token: str = Depends(verify_api_key)):
     logger.info("POST /plan/tasks - Generating actionable tasks")
-    model = get_gemini_model()
+    client = get_gemini_client()
     
     system_prompt = """You are a Technical Lead. Your goal is to break down the Technical Blueprint into a series of actionable, atomic tasks.
     
@@ -339,7 +336,10 @@ async def generate_tasks(request: TasksRequest, token: str = Depends(verify_api_
     """
     
     prompt = f"{system_prompt}\n\nTechnical Blueprint:\n{request.blueprint_content}\n\nAdditional Context:\n{request.additional_context}"
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(
+        model="gemini-3-pro-preview",
+        contents=prompt,
+    )
     return {"result": response.text}
 
 @app.post("/repo/index")
@@ -360,8 +360,11 @@ async def search_code(request: SearchRequest, token: str = Depends(verify_api_ke
     logger.info(f"POST /repo/search - Query: {request.query[:50]}...")
     # Stub implementation
     # In real life: vector_db.search(request.query)
-    model = get_gemini_model()
-    response = model.generate_content(f"Simulate a semantic code search result for query: '{request.query}'. Return 2-3 mocked file paths and snippet descriptions relevant to a typical web app.")
+    client = get_gemini_client()
+    response = client.models.generate_content(
+        model="gemini-3-pro-preview",
+        contents=f"Simulate a semantic code search result for query: '{request.query}'. Return 2-3 mocked file paths and snippet descriptions relevant to a typical web app.",
+    )
     return {"result": response.text}
 
 @app.post("/repo/related")
