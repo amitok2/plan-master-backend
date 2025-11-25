@@ -205,7 +205,7 @@ async def categorize_feature(request: FeatureRequest, token: str = Depends(verif
 
 @app.post("/plan/clarify")
 async def clarify_feature(request: ClarifyRequest, token: str = Depends(verify_api_key)):
-    logger.info(f"POST /plan/clarify - Request: {request.request[:50]}...")
+    logger.info(f"POST /plan/clarify - Request: {request.goal[:50]}...")
     # Use high thinking level for clarification as it requires deeper analysis
     api_key = os.environ.get("GEMINI_API_KEY")
     genai.configure(api_key=api_key)
@@ -389,9 +389,11 @@ if __name__ == "__main__":
     # Render provides the PORT environment variable
     # Default to 10000 if not set (standard Render behavior)
     port = int(os.environ.get("PORT", 10000))
-    logger.info(f"Starting server on 0.0.0.0:{port}")
+    logger.info(f"🚀 Starting Plan Master Backend...")
+    logger.info(f"listening on http://0.0.0.0:{port}")
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=port
+        port=port,
+        log_level="info"
     )
