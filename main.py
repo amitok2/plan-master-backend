@@ -24,7 +24,15 @@ def get_gemini_model():
         raise ValueError("GEMINI_API_KEY environment variable is not set on the backend.")
     
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel('gemini-2.0-flash-exp') # Or gemini-1.5-pro
+    # Using Gemini 3.0 Pro with low thinking level for faster responses
+    # For complex reasoning tasks, use thinking_level="high"
+    return genai.GenerativeModel(
+        'gemini-3-pro-preview',
+        generation_config={
+            "thinking_level": "low",  # Fast responses for planning tasks
+            "temperature": 1.0  # Keep default temperature as recommended
+        }
+    )
 
 class FileContext(BaseModel):
     path: str
@@ -102,7 +110,16 @@ async def categorize_feature(request: FeatureRequest, token: str = Depends(verif
 
 @app.post("/plan/clarify")
 async def clarify_feature(request: ClarifyRequest, token: str = Depends(verify_api_key)):
-    model = get_gemini_model()
+    # Use high thinking level for clarification as it requires deeper analysis
+    api_key = os.environ.get("GEMINI_API_KEY")
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(
+        'gemini-3-pro-preview',
+        generation_config={
+            "thinking_level": "high",  # Deep reasoning for question generation
+            "temperature": 1.0
+        }
+    )
     
     system_prompt = """You are a Senior Product Manager and Technical Architect. Your goal is to ask clarifying questions BEFORE creating a full feature plan.
     
