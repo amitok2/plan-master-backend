@@ -208,6 +208,9 @@ class SearchRequest(BaseModel):
 class RelatedRequest(BaseModel):
     target: str
 
+class EmbedRequest(BaseModel):
+    text: str
+
 class MemoryRequest(BaseModel):
     content: str
     key: Optional[str] = None
@@ -513,6 +516,24 @@ async def get_related_files(request: RelatedRequest, token: str = Depends(verify
     # Stub implementation
     # In real life: graph_db.get_neighbors(request.target)
     return {"result": f"Dependencies for '{request.target}': [MockServiceA, MockDB, Utils]"}
+
+@app.post("/repo/embed")
+async def embed_text(request: EmbedRequest, token: str = Depends(verify_api_key)):
+    logger.info(f"POST /repo/embed - Length: {len(request.text)}")
+    try:
+        clients = get_ai_clients()
+        if 'openai' not in clients:
+             raise HTTPException(status_code=503, detail="OpenAI API not configured on backend")
+        
+        client = clients['openai']
+        response = client.embeddings.create(
+            model="text-embedding-3-small",
+            input=request.text
+        )
+        return {"embedding": response.data[0].embedding}
+    except Exception as e:
+        logger.error(f"Embedding generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/memory/append")
 async def append_memory(request: MemoryRequest, token: str = Depends(verify_api_key)):
