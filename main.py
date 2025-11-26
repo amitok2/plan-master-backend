@@ -402,7 +402,6 @@ async def generate_prd(request: PRDRequest, token: str = Depends(verify_api_key)
 @app.post("/plan/blueprint")
 async def generate_blueprint(request: BlueprintRequest, token: str = Depends(verify_api_key)):
     logger.info("POST /plan/blueprint - Generating technical blueprint")
-    client = get_gemini_client()
     
     system_prompt = """You are a Senior Software Architect. Your goal is to create a Technical Implementation Blueprint based on the PRD and existing codebase.
     
@@ -441,12 +440,14 @@ async def generate_blueprint(request: BlueprintRequest, token: str = Depends(ver
     
     prompt = f"{system_prompt}\n\nPRD:\n{request.prd_content}\n\nCodebase Analysis:\n{request.codebase_context}\n\nAdditional Context:\n{request.additional_context}"
     
-    # Use gemini-2.5-pro for blueprint (good balance of quality and speed)
-    response = generate_with_gemini(
-        client,
+    # Use Claude 4.5 for blueprint (excellent at system design and architecture)
+    result = generate_with_ai(
         prompt,
-        model="gemini-2.5-pro"
+        provider="anthropic",
+        model="claude-sonnet-4-5",
+        config={"max_tokens": 4096}
     )
+    return {"result": result}
 
 @app.post("/plan/tasks")
 async def generate_tasks(request: TasksRequest, token: str = Depends(verify_api_key)):
