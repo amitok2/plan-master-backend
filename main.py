@@ -327,33 +327,36 @@ async def categorize_feature(request: FeatureRequest, token: str = Depends(verif
 async def clarify_feature(request: ClarifyRequest, token: str = Depends(verify_api_key)):
     logger.info(f"POST /plan/clarify - Request: {request.goal[:50]}...")
     
-    system_prompt = """You are a Senior Product Manager and Technical Architect. Your goal is to ask clarifying questions BEFORE creating a full feature plan.
+    system_prompt = """You are a Senior Product Manager and Technical Architect. Your goal is to determine if clarifying questions are needed BEFORE creating a full feature plan.
+
+    Analyze the feature request and codebase context carefully.
     
-    Analyze the feature request and codebase context, then generate 3-7 clarifying questions that will help you create a better implementation plan.
+    CRITICAL DECISION CRITERIA:
+    - If the feature request is CLEAR, SPECIFIC, and has SUFFICIENT DETAIL → Say "No clarification needed"
+    - If the feature request is VAGUE, AMBIGUOUS, or MISSING CRITICAL INFORMATION → Ask 3-5 targeted questions
     
-    Focus on questions about:
+    Examples of CLEAR requests (no questions needed):
+    - "Add a health check endpoint at /health that returns 200 OK"
+    - "Create a dark mode toggle in the settings page using localStorage"
+    - "Add JWT authentication to the API using the existing User model"
+    
+    Examples of UNCLEAR requests (questions needed):
+    - "Add authentication" (Which type? Where? For what?)
+    - "Improve performance" (What specifically? Which part?)
+    - "Add user management" (CRUD? Roles? Permissions?)
+    
+    Focus questions on:
     1. **Scope & Requirements**: What's included/excluded? Edge cases?
     2. **User Experience**: Who uses this? What's the expected flow?
     3. **Technical Decisions**: Which approach? Integration points? Data models?
     4. **Constraints**: Performance requirements? Security concerns? Backwards compatibility?
     5. **Success Criteria**: How do we measure success? What does "done" look like?
     
-    IMPORTANT:
-    - If the feature request is VERY clear and simple (e.g., "add a health check endpoint"), return ONLY 1-2 questions or say "No clarification needed - feature is clear."
-    - If the feature is vague or complex, ask 5-7 targeted questions.
-    - Make questions specific to the codebase and feature, not generic.
-    - Format as a numbered list in Markdown.
-    
-    Example output for a clear feature:
-    "No clarification needed - the feature request is clear and straightforward."
-    
-    Example output for a complex feature:
-    "Before creating the implementation plan, please clarify:
-    
-    1. **Authentication**: Should the new API use the existing JWT auth in `src/auth/` or implement OAuth2?
-    2. **Data Storage**: Should user preferences be stored in PostgreSQL (existing) or Redis for faster access?
-    3. **Backwards Compatibility**: Do we need to support the old `/api/v1/users` endpoint or can we deprecate it?
-    ..."
+    IMPORTANT OUTPUT FORMAT:
+    - For clear features: MUST start with exactly "No clarification needed - the feature request is clear and straightforward."
+    - For unclear features: Start with "Before creating the implementation plan, please clarify:" then list 3-5 numbered questions in Markdown.
+    - Keep questions specific to the codebase and feature, not generic.
+    - NEVER ask questions if the request is already clear enough to implement.
     """
     
     prompt = f"{system_prompt}\n\nFeature Request: {request.goal}\n\nCodebase Context:\n{request.codebase_context}"
